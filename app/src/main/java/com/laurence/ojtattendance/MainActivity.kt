@@ -136,8 +136,8 @@ class MainActivity : Activity() {
         form.addView(statusRow)
         form.addView(text("LATE TIME AND OVERTIME", 12f, muted, true), params(top = 8, bottom = 5))
         val extras = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        lateField = field("Late hours", "0")
-        overtimeField = field("Overtime hours", "0")
+        lateField = field("Late time", "0 hr 00 min")
+        overtimeField = field("Overtime time", "0 hr 00 min")
         lateField.isFocusable = false
         overtimeField.isFocusable = false
         lateField.setOnClickListener { askHours("Enter late hours", lateField) }
@@ -153,7 +153,7 @@ class MainActivity : Activity() {
             askHours("Enter overtime hours", overtimeField)
         }, LinearLayout.LayoutParams(0, dp(46), 1f).apply { leftMargin = dp(5) })
         form.addView(extraButtons, params(bottom = 4))
-        form.addView(text("Enter hours separately. Example: 0.5 = 30 minutes.", 11f, muted))
+        form.addView(text("Enter exact hours and minutes. Example: 1 hr 30 min.", 11f, muted))
         form.addView(actionButton("Save attendance", blue) { saveRecord() }, params(top = 12))
         form.addView(actionButton("Clear form", 0xFFE9EDF3.toInt(), navy) { clearForm() }, params(top = 6))
         root.addView(form, params(bottom = 12))
@@ -227,18 +227,45 @@ class MainActivity : Activity() {
         }, h, m, true).show()
     }
     private fun askHours(title: String, destination: EditText) {
-        val input = EditText(this).apply {
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
-            hint = "Hours (0.5 = 30 minutes)"
-            setText(destination.text.toString())
+        val current = durationMinutes(destination.text.toString())
+        val fields = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(16), dp(8), dp(16), dp(8))
         }
-        AlertDialog.Builder(this).setTitle(title).setView(input)
-            .setNegativeButton("Cancel", null)
+        val hours = EditText(this).apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            hint = "Hours"
+            setText((current / 60).toString())
+        }
+        val minutes = EditText(this).apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            hint = "Minutes"
+            setText((current % 60).toString().padStart(2, '0'))
+        }
+        fields.addView(hours, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = dp(8) })
+        fields.addView(minutes, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(8) })
+        AlertDialog.Builder(this).setTitle(title).setMessage("Enter exact hours and minutes.")
+            .setView(fields).setNegativeButton("Cancel", null)
             .setPositiveButton("Save") { _, _ ->
-                val n = input.text.toString().trim().ifEmpty { "0" }.toDoubleOrNull()
-                if (n == null || n < 0) toast("Enter a valid number.") else destination.setText(n.toString())
+                val h = hours.text.toString().toIntOrNull()
+                val m = minutes.text.toString().toIntOrNull()
+                if (h == null || m == null || h < 0 || m !in 0..59) {
+                    toast("Enter hours and minutes. Minutes must be 00–59.")
+                } else destination.setText(formatDuration(h * 60 + m))
             }.show()
     }
+
+    private fun durationMinutes(value: String): Int {
+        val parts = value.trim().split(":")
+        if (parts.size == 2) return (parts[0].toIntOrNull() ?: 0) * 60 + (parts[1].toIntOrNull() ?: 0)
+        val number = value.trim().toDoubleOrNull() ?: 0.0
+        return (number * 60).toInt()
+    }
+
+    private fun formatDuration(totalMinutes: Int): String =
+        String.format(Locale.US, "%d hr %02d min", totalMinutes / 60, totalMinutes % 60)
+
+    private fun durationHours(value: String): Double = durationMinutes(value) / 60.0
     private fun minutes(s: String): Int? {
         val p = s.split(":")
         if (p.size != 2) return null
@@ -267,11 +294,10 @@ class MainActivity : Activity() {
 
     private fun saveRecord() {
         val date = dateField.text.toString().trim()
-        val late = lateField.text.toString().trim().ifEmpty { "0" }.toDoubleOrNull()
-        val overtime = overtimeField.text.toString().trim().ifEmpty { "0" }.toDoubleOrNull()
+        val late = durationHours(lateField.text.toString())
+        val overtime = durationHours(overtimeField.text.toString())
         val worked = if (status == "Present") workedHours(inField.text.toString(), outField.text.toString()) else 0.0
-        if (!date.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) || late == null || overtime == null ||
-            late < 0 || overtime < 0 || (status == "Present" && worked <= 0)) {
+        if (!date.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) || late < 0 || overtime < 0 || (status == "Present" && worked <= 0)) {
             toast("Check the date, time in/out, late and overtime values.")
             return
         }
@@ -294,8 +320,8 @@ class MainActivity : Activity() {
         dateField.setText(today())
         inField.setText(morningStart)
         outField.setText(afternoonEnd)
-        lateField.setText("0")
-        overtimeField.setText("0")
+        lateField.setText("0 hr 00 min")
+        overtimeField.setText("0 hr 00 min")
         setStatus("Present")
     }
     private fun loadRecords() {
@@ -336,8 +362,8 @@ class MainActivity : Activity() {
             entry.addView(text(item.optString("date") + "  •  " + item.optString("status"), 14f, statusColor, true))
             entry.addView(text(item.optString("timeIn") + " to " + item.optString("timeOut") +
                 "  |  " + String.format(Locale.US, "%.2f", item.optDouble("hours")) + " credited hours", 12f, ink))
-            entry.addView(text("Late: " + String.format(Locale.US, "%.2f", item.optDouble("late")) +
-                " h    Overtime: " + String.format(Locale.US, "%.2f", item.optDouble("overtime")) + " h", 11f, muted))
+            entry.addView(text("Late: " + formatDuration((item.optDouble("late") * 60).toInt()) +
+                "    Overtime: " + formatDuration((item.optDouble("overtime") * 60).toInt()), 11f, muted))
             val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END }
             buttons.addView(actionButton("Edit", 0xFFE5EDF8.toInt(), navy) { edit(item) })
             buttons.addView(actionButton("Delete", 0xFFFCE8E8.toInt(), red) {
@@ -356,8 +382,8 @@ class MainActivity : Activity() {
         dateField.setText(item.optString("date"))
         inField.setText(item.optString("timeIn"))
         outField.setText(item.optString("timeOut"))
-        lateField.setText(item.optDouble("late", 0.0).toString())
-        overtimeField.setText(item.optDouble("overtime", 0.0).toString())
+        lateField.setText(formatDuration((item.optDouble("late", 0.0) * 60).toInt()))
+        overtimeField.setText(formatDuration((item.optDouble("overtime", 0.0) * 60).toInt()))
         setStatus(item.optString("status", "Present"))
         Toast.makeText(this, "Update the fields and tap Save attendance.", Toast.LENGTH_SHORT).show()
     }
