@@ -74,7 +74,7 @@ class MainActivity : Activity() {
         outField = field("Time Out (HH:MM)", "17:00")
         outField.setOnClickListener { chooseTime(outField) }
         root.addView(outField)
-        root.addView(label("Hours are counted only inside your configured work schedule. Lunch break is excluded automatically."))
+        root.addView(label("Late time and overtime are calculated automatically from your Time In and Time Out. Lunch break is excluded."))
         root.addView(button("Save Attendance") { saveRecord() })
         root.addView(button("Clear Form") { clearForm() })
         root.addView(button("Export CSV") { exportCsv() })
@@ -122,21 +122,28 @@ class MainActivity : Activity() {
         val m = match.groupValues[2].toInt()
         return if (h in 0..23 && m in 0..59) h * 60 + m else null
     }
-    private fun calculateHours(start: String, end: String): Double {
-        val a = minutes(start) ?: return -1.0
-        val b = minutes(end) ?: return -1.0
+    private fun shiftMinutes(start: String, end: String): Int {
+        val a = minutes(start) ?: return -1
+        val b = minutes(end) ?: return -1
         val finish = if (b <= a) b + 1440 else b
-        val blocks = listOf(
-            minutes(morningStart)!! to minutes(morningEnd)!!,
-            minutes(afternoonStart)!! to minutes(afternoonEnd)!!
-        )
-        var worked = 0
-        for ((blockStart, blockEnd) in blocks) {
-            val overlapStart = maxOf(a, blockStart)
-            val overlapEnd = minOf(finish, blockEnd)
-            if (overlapEnd > overlapStart) worked += overlapEnd - overlapStart
-        }
-        return worked / 60.0
+        val lunchStart = minutes(morningEnd)!!
+        val lunchEnd = minutes(afternoonStart)!!
+        val lunchOverlap = (minOf(finish, lunchEnd) - maxOf(a, lunchStart)).coerceAtLeast(0)
+        return (finish - a - lunchOverlap).coerceAtLeast(0)
+    }
+
+    private fun lateMinutes(start: String): Int {
+        val a = minutes(start) ?: return 0
+        return (a - minutes(morningStart)!!).coerceAtLeast(0)
+    }
+
+    private fun overtimeMinutes(start: String, end: String): Int {
+        val a = minutes(start) ?: return 0
+        val b = minutes(end) ?: return 0
+        val finish = if (b <= a) b + 1440 else b
+        val early = (minutes(morningStart)!! - a).coerceAtLeast(0)
+        val after = (finish - minutes(afternoonEnd)!!).coerceAtLeast(0)
+        return early + after
     }
 
     private fun showSettings() {
@@ -186,13 +193,17 @@ class MainActivity : Activity() {
         val date = dateField.text.toString().trim()
         val tin = inField.text.toString().trim()
         val tout = outField.text.toString().trim()
-        val hours = calculateHours(tin, tout)
-        if (!date.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) || hours <= 0.0) {
+        val workedMinutes = shiftMinutes(tin, tout)
+        val late = lateMinutes(tin)
+        val overtime = overtimeMinutes(tin, tout)
+        if (!date.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) || workedMinutes <= 0) {
             Toast.makeText(this, "Please enter a valid date and times within your work schedule.", Toast.LENGTH_LONG).show()
             return
         }
         val id = editingId ?: System.currentTimeMillis().toString()
-        val item = JSONObject().put("id", id).put("date", date).put("timeIn", tin).put("timeOut", tout).put("hours", hours)
+        val hours = workedMinutes / 60.0
+        val item = JSONObject().put("id", id).put("date", date).put("timeIn", tin).put("timeOut", tout)
+            .put("hours", hours).put("lateMinutes", late).put("overtimeMinutes", overtime)
         val index = records.indexOfFirst { it.optString("id") == id }
         if (index >= 0) records[index] = item else records.add(item)
         records.sortBy { it.optString("date") }
@@ -217,6 +228,8 @@ class MainActivity : Activity() {
         records.forEach { a.put(it) }
         prefs.edit().putString("records", a.toString()).apply()
     }
+    private fun formatMinutes(value: Int): String = "${value / 60}h ${value % 60}m"
+
     private fun refresh() {
         val total = records.sumOf { it.optDouble("hours") }
         progressLabel.text = "Progress: " + String.format(Locale.US, "%.1f", total) + " / " + String.format(Locale.US, "%.1f", targetHours) + " hours"
@@ -234,8 +247,11 @@ class MainActivity : Activity() {
                 setBackgroundColor(0xFFFFFFFF.toInt())
                 layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 10 }
             }
+            val late = item.optInt("lateMinutes", 0)
+            val overtime = item.optInt("overtimeMinutes", 0)
             card.addView(label(item.optString("date") + "   •   " + item.optString("timeIn") + " - " + item.optString("timeOut") +
-                "\\n" + String.format(Locale.US, "%.2f", item.optDouble("hours")) + " hours"))
+                "\\n" + String.format(Locale.US, "%.2f", item.optDouble("hours")) + " hours worked" +
+                "\\nLate: " + formatMinutes(late) + "   •   Overtime: " + formatMinutes(overtime)))
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END }
             row.addView(Button(this).apply {
                 text = "Edit"; isAllCaps = false
@@ -263,12 +279,14 @@ class MainActivity : Activity() {
             Toast.makeText(this, "No records to export.", Toast.LENGTH_SHORT).show()
             return
         }
-        val csv = StringBuilder("Date,Time In,Time Out,Hours\\n")
+        val csv = StringBuilder("Date,Time In,Time Out,Hours,Late Minutes,Overtime Minutes\\n")
         records.forEach {
             csv.append(it.optString("date")).append(",")
                 .append(it.optString("timeIn")).append(",")
                 .append(it.optString("timeOut")).append(",")
-                .append(it.optDouble("hours")).append("\\n")
+                .append(it.optDouble("hours")).append(",")
+                .append(it.optInt("lateMinutes", 0)).append(",")
+                .append(it.optInt("overtimeMinutes", 0)).append("\\n")
         }
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "text/csv"
