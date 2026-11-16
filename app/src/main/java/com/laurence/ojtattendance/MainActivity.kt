@@ -25,6 +25,8 @@ class MainActivity : Activity() {
     private lateinit var outField: EditText
     private lateinit var lateField: EditText
     private lateinit var overtimeField: EditText
+    private lateinit var statusButton: Button
+    private var attendanceStatus = "Present"
     private lateinit var progressLabel: TextView
     private lateinit var remainingLabel: TextView
     private lateinit var scheduleLabel: TextView
@@ -76,6 +78,11 @@ class MainActivity : Activity() {
         outField = field("Time Out (HH:MM)", "17:00")
         outField.setOnClickListener { chooseTime(outField) }
         root.addView(outField)
+        statusButton = button("Status: Present") {
+            attendanceStatus = if (attendanceStatus == "Present") "Absent" else "Present"
+            statusButton.text = "Status: $attendanceStatus"
+        }
+        root.addView(statusButton)
         lateField = field("Late hours", "0").apply { inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL; visibility = View.GONE }
         overtimeField = field("Overtime hours", "0").apply { inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL; visibility = View.GONE }
         root.addView(button("Enter Late Time") { promptHours("Enter Late Time", lateField) })
@@ -231,14 +238,14 @@ class MainActivity : Activity() {
         }
         val late = (lateHours * 60).toInt()
         val overtime = (overtimeHours * 60).toInt()
-        if (!date.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) || workedMinutes <= 0) {
+        if (!date.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) || (attendanceStatus == "Present" && workedMinutes <= 0)) {
             Toast.makeText(this, "Please enter a valid date and times within your work schedule.", Toast.LENGTH_LONG).show()
             return
         }
         val id = editingId ?: System.currentTimeMillis().toString()
-        val hours = workedMinutes / 60.0
+        val hours = if (attendanceStatus == "Present") workedMinutes / 60.0 else 0.0
         val item = JSONObject().put("id", id).put("date", date).put("timeIn", tin).put("timeOut", tout)
-            .put("hours", hours).put("lateMinutes", late).put("overtimeMinutes", overtime)
+            .put("status", attendanceStatus).put("hours", hours).put("lateMinutes", late).put("overtimeMinutes", overtime)
         val index = records.indexOfFirst { it.optString("id") == id }
         if (index >= 0) records[index] = item else records.add(item)
         records.sortBy { it.optString("date") }
@@ -254,6 +261,8 @@ class MainActivity : Activity() {
         outField.setText(afternoonEnd)
         lateField.setText("0")
         overtimeField.setText("0")
+        attendanceStatus = "Present"
+        statusButton.text = "Status: Present"
     }
     private fun loadRecords() {
         records.clear()
@@ -286,7 +295,7 @@ class MainActivity : Activity() {
             }
             val late = item.optInt("lateMinutes", 0)
             val overtime = item.optInt("overtimeMinutes", 0)
-            card.addView(label(item.optString("date") + "   •   " + item.optString("timeIn") + " - " + item.optString("timeOut") +
+            card.addView(label(item.optString("date") + "   •   " + item.optString("status", "Present") + "   •   " + item.optString("timeIn") + " - " + item.optString("timeOut") +
                 "\\n" + String.format(Locale.US, "%.2f", item.optDouble("hours")) + " hours worked" +
                 "\\nLate: " + formatMinutes(late) + "   •   Overtime: " + formatMinutes(overtime)))
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END }
@@ -297,6 +306,8 @@ class MainActivity : Activity() {
                     dateField.setText(item.optString("date"))
                     inField.setText(item.optString("timeIn"))
                     outField.setText(item.optString("timeOut"))
+                    attendanceStatus = item.optString("status", "Present")
+                    statusButton.text = "Status: $attendanceStatus"
                     lateField.setText(String.format(Locale.US, "%.2f", item.optInt("lateMinutes", 0) / 60.0))
                     overtimeField.setText(String.format(Locale.US, "%.2f", item.optInt("overtimeMinutes", 0) / 60.0))
                     Toast.makeText(this@MainActivity, "Edit the fields above, then tap Save.", Toast.LENGTH_SHORT).show()
@@ -318,9 +329,10 @@ class MainActivity : Activity() {
             Toast.makeText(this, "No records to export.", Toast.LENGTH_SHORT).show()
             return
         }
-        val csv = StringBuilder("Date,Time In,Time Out,Hours,Late Minutes,Overtime Minutes\\n")
+        val csv = StringBuilder("Date,Status,Time In,Time Out,Hours,Late Minutes,Overtime Minutes\\n")
         records.forEach {
             csv.append(it.optString("date")).append(",")
+                .append(it.optString("status", "Present")).append(",")
                 .append(it.optString("timeIn")).append(",")
                 .append(it.optString("timeOut")).append(",")
                 .append(it.optDouble("hours")).append(",")
