@@ -10,6 +10,8 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.widget.*
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -19,7 +21,35 @@ import java.util.Locale
 
 class MainActivity : Activity() {
     private val records = mutableListOf<JSONObject>()
-    private val prefs by lazy { getSharedPreferences("ojt_records", MODE_PRIVATE) }
+    private val prefs by lazy {
+        val masterKey = MasterKey.Builder(applicationContext)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        val encrypted = EncryptedSharedPreferences.create(
+            applicationContext,
+            "ojt_records_secure",
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+        val legacy = getSharedPreferences("ojt_records", MODE_PRIVATE)
+        if (!encrypted.getBoolean("_migration_complete", false)) {
+            val editor = encrypted.edit()
+            legacy.all.forEach { entry ->
+                when (val value = entry.value) {
+                    is String -> editor.putString(entry.key, value)
+                    is Boolean -> editor.putBoolean(entry.key, value)
+                    is Float -> editor.putFloat(entry.key, value)
+                    is Int -> editor.putInt(entry.key, value)
+                    is Long -> editor.putLong(entry.key, value)
+                    is Set<*> -> editor.putStringSet(entry.key, value.filterIsInstance<String>().toSet())
+                }
+            }
+            editor.putBoolean("_migration_complete", true)
+            if (editor.commit()) legacy.edit().clear().commit()
+        }
+        encrypted
+    }
     private lateinit var dateField: EditText
     private lateinit var inField: EditText
     private lateinit var outField: EditText
