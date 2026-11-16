@@ -244,11 +244,14 @@ class MainActivity : Activity() {
         val a = minutes(start) ?: return -1.0
         val b = minutes(end) ?: return -1.0
         if (b <= a) return -1.0
-        val lunchA = minutes(morningEnd) ?: return -1.0
-        val lunchB = minutes(afternoonStart) ?: return -1.0
-        val total = b - a
-        val lunch = (minOf(b, lunchB) - maxOf(a, lunchA)).coerceAtLeast(0)
-        return (total - lunch).coerceAtLeast(0) / 60.0
+        val ms = minutes(morningStart) ?: return -1.0
+        val me = minutes(morningEnd) ?: return -1.0
+        val asf = minutes(afternoonStart) ?: return -1.0
+        val ae = minutes(afternoonEnd) ?: return -1.0
+        fun overlap(x1: Int, x2: Int, y1: Int, y2: Int) =
+            (minOf(x2, y2) - maxOf(x1, y1)).coerceAtLeast(0)
+        val regular = overlap(a, b, ms, me) + overlap(a, b, asf, ae)
+        return regular / 60.0
     }
 
     private fun saveRecord() {
