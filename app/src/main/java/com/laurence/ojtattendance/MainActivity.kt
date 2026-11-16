@@ -178,7 +178,7 @@ class MainActivity : Activity() {
         }
     private fun field(hintText: String, value: String): EditText =
         EditText(this).apply {
-            hint = hintText; setText(value); textSize = 14f; singleLine = true
+            hint = hintText; setText(value); textSize = 14f; isSingleLine = true
             setTextColor(ink); setHintTextColor(muted)
             setPadding(dp(12), dp(8), dp(12), dp(8))
             background = rounded(0xFFF5F7FA.toInt(), 10)
