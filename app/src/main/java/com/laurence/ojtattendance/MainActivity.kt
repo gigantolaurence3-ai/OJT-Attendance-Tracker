@@ -30,6 +30,7 @@ class MainActivity : Activity() {
     private lateinit var progressLabel: TextView
     private lateinit var remainingLabel: TextView
     private lateinit var scheduleLabel: TextView
+    private lateinit var estimateLabel: TextView
     private lateinit var recordsBox: LinearLayout
     private var editingId: String? = null
 
@@ -64,6 +65,9 @@ class MainActivity : Activity() {
         root.addView(progressLabel)
         remainingLabel = label("")
         root.addView(remainingLabel)
+        estimateLabel = label("")
+        root.addView(estimateLabel)
+        root.addView(button("Open Attendance Calendar") { showCalendar() })
         root.addView(button("Customize Target & Work Hours") { showSettings() })
         scheduleLabel = label("")
         root.addView(scheduleLabel)
@@ -281,6 +285,7 @@ class MainActivity : Activity() {
         progressLabel.text = "Progress: " + String.format(Locale.US, "%.1f", total) + " / " + String.format(Locale.US, "%.1f", targetHours) + " hours"
         remainingLabel.text = "Remaining: " + String.format(Locale.US, "%.1f", (targetHours - total).coerceAtLeast(0.0)) + " hours"
         scheduleLabel.text = "Work schedule: $morningStart–$morningEnd  •  $afternoonStart–$afternoonEnd"
+        updateEstimate(total)
         recordsBox.removeAllViews()
         if (records.isEmpty()) {
             recordsBox.addView(label("No attendance records yet."))
@@ -324,7 +329,115 @@ class MainActivity : Activity() {
             recordsBox.addView(card)
         }
     }
-    private fun exportCsv() {
+
+    private fun updateEstimate(completedHours: Double) {
+        val remaining = (targetHours - completedHours).coerceAtLeast(0.0)
+        val dailyHours = shiftMinutes(morningStart, afternoonEnd).coerceAtLeast(0) / 60.0
+        if (remaining <= 0.0) {
+            estimateLabel.text = "Estimated completion: OJT hours completed!"
+            return
+        }
+        if (dailyHours <= 0.0) {
+            estimateLabel.text = "Estimated completion: Set a valid work schedule."
+            return
+        }
+        var daysNeeded = kotlin.math.ceil(remaining / dailyHours).toInt()
+        val date = Calendar.getInstance()
+        date.add(Calendar.DAY_OF_MONTH, 1)
+        while (daysNeeded > 0) {
+            if (date.get(Calendar.DAY_OF_WEEK) != Calendar.SUNDAY) daysNeeded--
+            if (daysNeeded > 0) date.add(Calendar.DAY_OF_MONTH, 1)
+        }
+        val formatted = SimpleDateFormat("MMMM d, yyyy", Locale.US).format(date.time)
+        estimateLabel.text = "Estimated completion: $formatted\\nBased on " +
+            String.format(Locale.US, "%.1f", dailyHours) +
+            " hours/day, 6 days/week (Sunday off), excluding holidays."
+    }
+
+    private fun showCalendar() {
+        val month = Calendar.getInstance()
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(18, 8, 18, 8)
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        val monthTitle = TextView(this).apply {
+            textSize = 17f
+            setTypeface(null, Typeface.BOLD)
+            gravity = Gravity.CENTER
+        }
+        val grid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        fun renderMonth() {
+            monthTitle.text = SimpleDateFormat("MMMM yyyy", Locale.US).format(month.time)
+            grid.removeAllViews()
+            val weekdays = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+            val weekHeader = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            weekdays.forEach { dayName ->
+                weekHeader.addView(TextView(this).apply {
+                    text = dayName
+                    textSize = 11f
+                    gravity = Gravity.CENTER
+                    setTypeface(null, Typeface.BOLD)
+                    layoutParams = LinearLayout.LayoutParams(0, 38, 1f)
+                })
+            }
+            grid.addView(weekHeader)
+            val first = (month.clone() as Calendar).apply { set(Calendar.DAY_OF_MONTH, 1) }
+            val offset = first.get(Calendar.DAY_OF_WEEK) - 1
+            val days = first.getActualMaximum(Calendar.DAY_OF_MONTH)
+            var day = 1
+            for (week in 0 until 6) {
+                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                for (col in 0 until 7) {
+                    val cell = TextView(this).apply {
+                        gravity = Gravity.CENTER
+                        textSize = 12f
+                        layoutParams = LinearLayout.LayoutParams(0, 43, 1f)
+                    }
+                    if ((week > 0 || col >= offset) && day <= days) {
+                        val dateKey = String.format(Locale.US, "%04d-%02d-%02d",
+                            month.get(Calendar.YEAR), month.get(Calendar.MONTH) + 1, day)
+                        val record = records.firstOrNull { it.optString("date") == dateKey }
+                        val mark = when (record?.optString("status", "Present")) {
+                            "Present" -> "P"
+                            "Absent" -> "A"
+                            else -> ""
+                        }
+                        cell.text = if (mark.isEmpty()) day.toString() else "$day\\n$mark"
+                        if (mark == "P") cell.setTextColor(0xFF16834A.toInt())
+                        if (mark == "A") cell.setTextColor(0xFFCC3434.toInt())
+                        if (record != null) cell.setTypeface(null, Typeface.BOLD)
+                        day++
+                    }
+                    row.addView(cell)
+                }
+                grid.addView(row)
+                if (day > days) break
+            }
+        }
+        header.addView(Button(this).apply {
+            text = "‹"; isAllCaps = false
+            setOnClickListener { month.add(Calendar.MONTH, -1); renderMonth() }
+        })
+        header.addView(monthTitle, LinearLayout.LayoutParams(0, -2, 1f))
+        header.addView(Button(this).apply {
+            text = "›"; isAllCaps = false
+            setOnClickListener { month.add(Calendar.MONTH, 1); renderMonth() }
+        })
+        panel.addView(header)
+        panel.addView(grid)
+        panel.addView(label("P = Present     A = Absent     Blank = No record"))
+        renderMonth()
+        AlertDialog.Builder(this)
+            .setTitle("Attendance Calendar")
+            .setView(panel)
+            .setPositiveButton("Close", null)
+            .show()
+    }
+\n    private fun exportCsv() {
         if (records.isEmpty()) {
             Toast.makeText(this, "No records to export.", Toast.LENGTH_SHORT).show()
             return
