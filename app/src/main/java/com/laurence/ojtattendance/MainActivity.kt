@@ -1,12 +1,14 @@
 package com.laurence.ojtattendance
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Intent
 import android.graphics.Typeface
 import android.os.Bundle
 import android.view.Gravity
+import android.view.View
 import android.widget.*
 import org.json.JSONArray
 import org.json.JSONObject
@@ -23,8 +25,15 @@ class MainActivity : Activity() {
     private lateinit var outField: EditText
     private lateinit var progressLabel: TextView
     private lateinit var remainingLabel: TextView
+    private lateinit var scheduleLabel: TextView
     private lateinit var recordsBox: LinearLayout
     private var editingId: String? = null
+
+    private val targetHours get() = prefs.getFloat("target_hours", 1800f).toDouble()
+    private val morningStart get() = prefs.getString("morning_start", "08:00")!!
+    private val morningEnd get() = prefs.getString("morning_end", "12:00")!!
+    private val afternoonStart get() = prefs.getString("afternoon_start", "13:00")!!
+    private val afternoonEnd get() = prefs.getString("afternoon_end", "17:00")!!
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,13 +53,16 @@ class MainActivity : Activity() {
             setTextColor(0xFF14243A.toInt())
             setTypeface(null, Typeface.BOLD)
         })
-        root.addView(label("Offline attendance record • 1,800-hour target"))
+        root.addView(label("Offline attendance record"))
         progressLabel = label("")
         progressLabel.textSize = 19f
         progressLabel.setTypeface(null, Typeface.BOLD)
         root.addView(progressLabel)
         remainingLabel = label("")
         root.addView(remainingLabel)
+        root.addView(button("Customize Target & Work Hours") { showSettings() })
+        scheduleLabel = label("")
+        root.addView(scheduleLabel)
 
         root.addView(section("DAILY ATTENDANCE"))
         dateField = field("Date (YYYY-MM-DD)", today())
@@ -62,6 +74,7 @@ class MainActivity : Activity() {
         outField = field("Time Out (HH:MM)", "17:00")
         outField.setOnClickListener { chooseTime(outField) }
         root.addView(outField)
+        root.addView(label("Hours are counted only inside your configured work schedule. Lunch break is excluded automatically."))
         root.addView(button("Save Attendance") { saveRecord() })
         root.addView(button("Clear Form") { clearForm() })
         root.addView(button("Export CSV") { exportCsv() })
@@ -96,26 +109,86 @@ class MainActivity : Activity() {
     }
     private fun chooseTime(target: EditText) {
         val c = Calendar.getInstance()
+        val parts = target.text.toString().split(":")
+        val hour = parts.getOrNull(0)?.toIntOrNull() ?: c.get(Calendar.HOUR_OF_DAY)
+        val minute = parts.getOrNull(1)?.toIntOrNull() ?: c.get(Calendar.MINUTE)
         TimePickerDialog(this, { _, h, m ->
             target.setText(String.format(Locale.US, "%02d:%02d", h, m))
-        }, c.get(Calendar.HOUR_OF_DAY), c.get(Calendar.MINUTE), true).show()
+        }, hour, minute, true).show()
+    }
+    private fun minutes(value: String): Int? {
+        val match = Regex("^(\\d{2}):(\\d{2})$").matchEntire(value) ?: return null
+        val h = match.groupValues[1].toInt()
+        val m = match.groupValues[2].toInt()
+        return if (h in 0..23 && m in 0..59) h * 60 + m else null
     }
     private fun calculateHours(start: String, end: String): Double {
-        return try {
-            val fmt = SimpleDateFormat("HH:mm", Locale.US).apply { isLenient = false }
-            val a = fmt.parse(start)!!.time
-            var b = fmt.parse(end)!!.time
-            if (b <= a) b += 86400000L
-            ((b - a) / 3600000.0).coerceAtMost(24.0)
-        } catch (_: Exception) { -1.0 }
+        val a = minutes(start) ?: return -1.0
+        val b = minutes(end) ?: return -1.0
+        val finish = if (b <= a) b + 1440 else b
+        val blocks = listOf(
+            minutes(morningStart)!! to minutes(morningEnd)!!,
+            minutes(afternoonStart)!! to minutes(afternoonEnd)!!
+        )
+        var worked = 0
+        for ((blockStart, blockEnd) in blocks) {
+            val overlapStart = maxOf(a, blockStart)
+            val overlapEnd = minOf(finish, blockEnd)
+            if (overlapEnd > overlapStart) worked += overlapEnd - overlapStart
+        }
+        return worked / 60.0
     }
+
+    private fun showSettings() {
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 8, 24, 0)
+        }
+        val target = field("Required total hours (example: 1800)", targetHours.toString().removeSuffix(".0"))
+        val ms = field("Morning start", morningStart)
+        val me = field("Morning end", morningEnd)
+        val asf = field("Afternoon start", afternoonStart)
+        val ae = field("Afternoon end", afternoonEnd)
+        listOf(target, ms, me, asf, ae).forEach { panel.addView(it) }
+        listOf(ms, me, asf, ae).forEach { edit ->
+            edit.setOnClickListener { chooseTime(edit) }
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Customize OJT Hours")
+            .setMessage("Default schedule: 8:00 AM–12:00 NN and 1:00 PM–5:00 PM. Change any value below.")
+            .setView(panel)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save") { _, _ ->
+                val goal = target.text.toString().trim().toDoubleOrNull()
+                val m1 = minutes(ms.text.toString().trim())
+                val m2 = minutes(me.text.toString().trim())
+                val a1 = minutes(asf.text.toString().trim())
+                val a2 = minutes(ae.text.toString().trim())
+                if (goal == null || goal <= 0 || m1 == null || m2 == null || a1 == null || a2 == null ||
+                    m1 >= m2 || m2 > a1 || a1 >= a2) {
+                    Toast.makeText(this, "Check the target and times. Use start, end, lunch break, then afternoon hours.", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                prefs.edit()
+                    .putFloat("target_hours", goal.toFloat())
+                    .putString("morning_start", ms.text.toString().trim())
+                    .putString("morning_end", me.text.toString().trim())
+                    .putString("afternoon_start", asf.text.toString().trim())
+                    .putString("afternoon_end", ae.text.toString().trim())
+                    .apply()
+                refresh()
+                Toast.makeText(this, "Work hours updated.", Toast.LENGTH_SHORT).show()
+            }
+            .show()
+    }
+
     private fun saveRecord() {
         val date = dateField.text.toString().trim()
         val tin = inField.text.toString().trim()
         val tout = outField.text.toString().trim()
         val hours = calculateHours(tin, tout)
         if (!date.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) || hours <= 0.0) {
-            Toast.makeText(this, "Please enter a valid date and time.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Please enter a valid date and times within your work schedule.", Toast.LENGTH_LONG).show()
             return
         }
         val id = editingId ?: System.currentTimeMillis().toString()
@@ -131,8 +204,8 @@ class MainActivity : Activity() {
     private fun clearForm() {
         editingId = null
         dateField.setText(today())
-        inField.setText("08:00")
-        outField.setText("17:00")
+        inField.setText(morningStart)
+        outField.setText(afternoonEnd)
     }
     private fun loadRecords() {
         records.clear()
@@ -146,8 +219,9 @@ class MainActivity : Activity() {
     }
     private fun refresh() {
         val total = records.sumOf { it.optDouble("hours") }
-        progressLabel.text = "Progress: " + String.format(Locale.US, "%.1f", total) + " / 1,800 hours"
-        remainingLabel.text = "Remaining: " + String.format(Locale.US, "%.1f", (1800.0 - total).coerceAtLeast(0.0)) + " hours"
+        progressLabel.text = "Progress: " + String.format(Locale.US, "%.1f", total) + " / " + String.format(Locale.US, "%.1f", targetHours) + " hours"
+        remainingLabel.text = "Remaining: " + String.format(Locale.US, "%.1f", (targetHours - total).coerceAtLeast(0.0)) + " hours"
+        scheduleLabel.text = "Work schedule: $morningStart–$morningEnd  •  $afternoonStart–$afternoonEnd"
         recordsBox.removeAllViews()
         if (records.isEmpty()) {
             recordsBox.addView(label("No attendance records yet."))
@@ -161,7 +235,7 @@ class MainActivity : Activity() {
                 layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 10 }
             }
             card.addView(label(item.optString("date") + "   •   " + item.optString("timeIn") + " - " + item.optString("timeOut") +
-                "\n" + String.format(Locale.US, "%.2f", item.optDouble("hours")) + " hours"))
+                "\\n" + String.format(Locale.US, "%.2f", item.optDouble("hours")) + " hours"))
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END }
             row.addView(Button(this).apply {
                 text = "Edit"; isAllCaps = false
@@ -189,12 +263,12 @@ class MainActivity : Activity() {
             Toast.makeText(this, "No records to export.", Toast.LENGTH_SHORT).show()
             return
         }
-        val csv = StringBuilder("Date,Time In,Time Out,Hours\n")
+        val csv = StringBuilder("Date,Time In,Time Out,Hours\\n")
         records.forEach {
             csv.append(it.optString("date")).append(",")
                 .append(it.optString("timeIn")).append(",")
                 .append(it.optString("timeOut")).append(",")
-                .append(it.optDouble("hours")).append("\n")
+                .append(it.optDouble("hours")).append("\\n")
         }
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "text/csv"
