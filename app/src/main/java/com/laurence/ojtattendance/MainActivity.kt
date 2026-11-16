@@ -256,10 +256,22 @@ class MainActivity : Activity() {
     }
 
     private fun durationMinutes(value: String): Int {
-        val parts = value.trim().split(":")
-        if (parts.size == 2) return (parts[0].toIntOrNull() ?: 0) * 60 + (parts[1].toIntOrNull() ?: 0)
-        val number = value.trim().toDoubleOrNull() ?: 0.0
-        return (number * 60).toInt()
+        val text = value.trim().lowercase(Locale.US)
+        val formatted = Regex("^(\\d+)\\s*hr\\s*(\\d{1,2})\\s*min$").matchEntire(text)
+        if (formatted != null) {
+            val h = formatted.groupValues[1].toIntOrNull() ?: 0
+            val m = formatted.groupValues[2].toIntOrNull() ?: 0
+            return if (m in 0..59) h * 60 + m else 0
+        }
+        val clock = Regex("^(\\d+):(\\d{1,2})$").matchEntire(text)
+        if (clock != null) {
+            val h = clock.groupValues[1].toIntOrNull() ?: 0
+            val m = clock.groupValues[2].toIntOrNull() ?: 0
+            return if (m in 0..59) h * 60 + m else 0
+        }
+        // Read older saved decimal-hour values for compatibility with existing records.
+        val number = text.toDoubleOrNull() ?: 0.0
+        return if (number >= 0) (number * 60).toInt() else 0
     }
 
     private fun formatDuration(totalMinutes: Int): String =
