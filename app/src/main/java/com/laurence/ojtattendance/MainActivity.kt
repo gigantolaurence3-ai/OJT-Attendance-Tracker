@@ -76,14 +76,11 @@ class MainActivity : Activity() {
         outField = field("Time Out (HH:MM)", "17:00")
         outField.setOnClickListener { chooseTime(outField) }
         root.addView(outField)
-        lateField = field("Late hours (example: 0.5 = 30 minutes)", "0")
-        lateField.inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
-        root.addView(label("Late time (hours) — enter the amount manually"))
-        root.addView(lateField)
-        overtimeField = field("Overtime hours (example: 1.5)", "0")
-        overtimeField.inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
-        root.addView(label("Overtime (hours) — enter the amount manually"))
-        root.addView(overtimeField)
+        lateField = field("Late hours", "0").apply { inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL; visibility = View.GONE }
+        overtimeField = field("Overtime hours", "0").apply { inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL; visibility = View.GONE }
+        root.addView(button("Enter Late Time") { promptHours("Enter Late Time", lateField) })
+        root.addView(button("Enter Overtime") { promptHours("Enter Overtime", overtimeField) })
+        root.addView(label("Late and overtime are entered separately and saved with the attendance record."))
         root.addView(button("Save Attendance") { saveRecord() })
         root.addView(button("Clear Form") { clearForm() })
         root.addView(button("Export CSV") { exportCsv() })
@@ -108,6 +105,29 @@ class MainActivity : Activity() {
     private fun button(s: String, action: () -> Unit) = Button(this).apply {
         text = s; isAllCaps = false; setOnClickListener { action() }
     }
+    private fun promptHours(title: String, target: EditText) {
+        val input = EditText(this).apply {
+            hint = "Hours (example: 0.5 = 30 minutes)"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setText(target.text.toString())
+            setSelection(text.length)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(input)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save") { _, _ ->
+                val value = input.text.toString().trim().ifEmpty { "0" }.toDoubleOrNull()
+                if (value == null || value < 0) {
+                    Toast.makeText(this, "Enter a valid number of hours.", Toast.LENGTH_SHORT).show()
+                } else {
+                    target.setText(value.toString())
+                    Toast.makeText(this, "$title saved for this attendance entry.", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .show()
+    }
+
     private fun today() = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
 
     private fun chooseDate() {
