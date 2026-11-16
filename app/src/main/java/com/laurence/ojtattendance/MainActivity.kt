@@ -437,7 +437,8 @@ class MainActivity : Activity() {
             .setPositiveButton("Close", null)
             .show()
     }
-\n    private fun exportCsv() {
+
+    private fun exportCsv() {
         if (records.isEmpty()) {
             Toast.makeText(this, "No records to export.", Toast.LENGTH_SHORT).show()
             return
