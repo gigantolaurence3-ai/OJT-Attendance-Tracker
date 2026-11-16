@@ -23,6 +23,8 @@ class MainActivity : Activity() {
     private lateinit var dateField: EditText
     private lateinit var inField: EditText
     private lateinit var outField: EditText
+    private lateinit var lateField: EditText
+    private lateinit var overtimeField: EditText
     private lateinit var progressLabel: TextView
     private lateinit var remainingLabel: TextView
     private lateinit var scheduleLabel: TextView
@@ -74,7 +76,14 @@ class MainActivity : Activity() {
         outField = field("Time Out (HH:MM)", "17:00")
         outField.setOnClickListener { chooseTime(outField) }
         root.addView(outField)
-        root.addView(label("Late time and overtime are calculated automatically from your Time In and Time Out. Lunch break is excluded."))
+        lateField = field("Late hours (example: 0.5 = 30 minutes)", "0")
+        lateField.inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+        root.addView(label("Late time (hours) — enter the amount manually"))
+        root.addView(lateField)
+        overtimeField = field("Overtime hours (example: 1.5)", "0")
+        overtimeField.inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+        root.addView(label("Overtime (hours) — enter the amount manually"))
+        root.addView(overtimeField)
         root.addView(button("Save Attendance") { saveRecord() })
         root.addView(button("Clear Form") { clearForm() })
         root.addView(button("Export CSV") { exportCsv() })
@@ -194,8 +203,14 @@ class MainActivity : Activity() {
         val tin = inField.text.toString().trim()
         val tout = outField.text.toString().trim()
         val workedMinutes = shiftMinutes(tin, tout)
-        val late = lateMinutes(tin)
-        val overtime = overtimeMinutes(tin, tout)
+        val lateHours = lateField.text.toString().trim().ifEmpty { "0" }.toDoubleOrNull()
+        val overtimeHours = overtimeField.text.toString().trim().ifEmpty { "0" }.toDoubleOrNull()
+        if (lateHours == null || overtimeHours == null || lateHours < 0 || overtimeHours < 0) {
+            Toast.makeText(this, "Enter valid late and overtime hours (0 or higher).", Toast.LENGTH_LONG).show()
+            return
+        }
+        val late = (lateHours * 60).toInt()
+        val overtime = (overtimeHours * 60).toInt()
         if (!date.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) || workedMinutes <= 0) {
             Toast.makeText(this, "Please enter a valid date and times within your work schedule.", Toast.LENGTH_LONG).show()
             return
@@ -217,6 +232,8 @@ class MainActivity : Activity() {
         dateField.setText(today())
         inField.setText(morningStart)
         outField.setText(afternoonEnd)
+        lateField.setText("0")
+        overtimeField.setText("0")
     }
     private fun loadRecords() {
         records.clear()
@@ -260,6 +277,8 @@ class MainActivity : Activity() {
                     dateField.setText(item.optString("date"))
                     inField.setText(item.optString("timeIn"))
                     outField.setText(item.optString("timeOut"))
+                    lateField.setText(String.format(Locale.US, "%.2f", item.optInt("lateMinutes", 0) / 60.0))
+                    overtimeField.setText(String.format(Locale.US, "%.2f", item.optInt("overtimeMinutes", 0) / 60.0))
                     Toast.makeText(this@MainActivity, "Edit the fields above, then tap Save.", Toast.LENGTH_SHORT).show()
                 }
             })
