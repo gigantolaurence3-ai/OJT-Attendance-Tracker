@@ -134,15 +134,26 @@ class MainActivity : Activity() {
         statusRow.addView(presentButton, LinearLayout.LayoutParams(0, 46, 1f).apply { rightMargin = 5 })
         statusRow.addView(absentButton, LinearLayout.LayoutParams(0, 46, 1f).apply { leftMargin = 5 })
         form.addView(statusRow)
+        form.addView(text("LATE TIME AND OVERTIME", 12f, muted, true), params(top = 8, bottom = 5))
         val extras = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         lateField = field("Late hours", "0")
         overtimeField = field("Overtime hours", "0")
+        lateField.isFocusable = false
+        overtimeField.isFocusable = false
         lateField.setOnClickListener { askHours("Enter late hours", lateField) }
         overtimeField.setOnClickListener { askHours("Enter overtime hours", overtimeField) }
         extras.addView(lateField, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = 5 })
         extras.addView(overtimeField, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = 5 })
         form.addView(extras)
-        form.addView(text("Tap either field to enter the exact number of hours. Example: 0.5 = 30 minutes.", 11f, muted))
+        val extraButtons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        extraButtons.addView(actionButton("＋ Add Late", 0xFFE5EDF8.toInt(), navy) {
+            askHours("Enter late hours", lateField)
+        }, LinearLayout.LayoutParams(0, dp(46), 1f).apply { rightMargin = dp(5) })
+        extraButtons.addView(actionButton("＋ Add Overtime", 0xFFE5EDF8.toInt(), navy) {
+            askHours("Enter overtime hours", overtimeField)
+        }, LinearLayout.LayoutParams(0, dp(46), 1f).apply { leftMargin = dp(5) })
+        form.addView(extraButtons, params(bottom = 4))
+        form.addView(text("Enter hours separately. Example: 0.5 = 30 minutes.", 11f, muted))
         form.addView(actionButton("Save attendance", blue) { saveRecord() }, params(top = 12))
         form.addView(actionButton("Clear form", 0xFFE9EDF3.toInt(), navy) { clearForm() }, params(top = 6))
         root.addView(form, params(bottom = 12))
