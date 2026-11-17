@@ -22,10 +22,33 @@ jobs:
           echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
           yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
           /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - name: Build debug APK
-        run: gradle --no-daemon assembleDebug
-      - uses: actions/upload-artifact@v4
+      - name: Configure release signing
+        if: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' }}
+        env:
+          KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/release.jks"
+          echo "RELEASE_STORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          echo "RELEASE_STORE_PASSWORD=${{ secrets.RELEASE_STORE_PASSWORD }}" >> "$GITHUB_ENV"
+          echo "RELEASE_KEY_ALIAS=${{ secrets.RELEASE_KEY_ALIAS }}" >> "$GITHUB_ENV"
+          echo "RELEASE_KEY_PASSWORD=${{ secrets.RELEASE_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+      - name: Build signed release APK
+        if: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' }}
+        run: gradle --no-daemon assembleRelease
+      - name: Upload signed release APK
+        if: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' }}
+        uses: actions/upload-artifact@v4
         with:
-          name: OJT-Attendance-Tracker-APK
+          name: OJT-Attendance-Tracker-Release
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+      - name: Build debug APK (until release key is configured)
+        if: ${{ secrets.RELEASE_KEYSTORE_BASE64 == '' }}
+        run: gradle --no-daemon assembleDebug
+      - name: Upload debug APK
+        if: ${{ secrets.RELEASE_KEYSTORE_BASE64 == '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: OJT-Attendance-Tracker-Debug
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
