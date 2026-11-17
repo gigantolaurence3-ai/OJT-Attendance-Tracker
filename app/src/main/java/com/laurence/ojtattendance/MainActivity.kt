@@ -304,15 +304,17 @@ class MainActivity : Activity() {
         val late = lateMinutesFromTime(lateField.text.toString()) / 60.0
         val overtime = overtimeMinutesFromTime(overtimeField.text.toString()) / 60.0
         val worked = if (status == "Present") workedHours(inField.text.toString(), outField.text.toString()) else 0.0
-        if (!date.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) || late < 0 || overtime < 0 || (status == "Present" && worked <= 0)) {
-            toast("Check the date, time in/out, late and overtime values.")
+        if (!date.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) || late < 0 || overtime < 0 || (status == "Present" && worked < 0)) {
+            toast("Check the date and time values.")
             return
         }
+        // A full day is 8 hours. Deduct late minutes once, then add overtime.
+        val credited = if (status == "Present") ((8 * 60 - (late * 60).toInt()).coerceAtLeast(0) + (overtime * 60).toInt()) / 60.0 else 0.0
         val id = editingId ?: System.currentTimeMillis().toString()
         val item = JSONObject()
             .put("id", id).put("date", date).put("timeIn", inField.text.toString())
             .put("timeOut", outField.text.toString()).put("status", status)
-            .put("hours", worked + if (status == "Present") overtime else 0.0)
+            .put("hours", credited)
             .put("late", late).put("overtime", overtime).put("timeBased", true)
         val old = records.indexOfFirst { it.optString("id") == id || it.optString("date") == date }
         if (old >= 0) records[old] = item else records.add(item)
@@ -343,6 +345,13 @@ class MainActivity : Activity() {
                 item.put("overtime", (oldOvertimeClock - (minutes(afternoonEnd) ?: 0)).coerceAtLeast(0) / 60.0)
                 item.put("timeBased", true)
             }
+            // Recalculate every present record using the 8-hour daily target.
+            val lateMinutes = (item.optDouble("late", 0.0) * 60).toInt().coerceAtLeast(0)
+            val overtimeMinutes = (item.optDouble("overtime", 0.0) * 60).toInt().coerceAtLeast(0)
+            val creditedMinutes = if (item.optString("status") == "Present") {
+                (8 * 60 - lateMinutes).coerceAtLeast(0) + overtimeMinutes
+            } else 0
+            item.put("hours", creditedMinutes / 60.0)
             records.add(item)
         }
         persist()
