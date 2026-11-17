@@ -136,24 +136,24 @@ class MainActivity : Activity() {
         form.addView(statusRow)
         form.addView(text("LATE TIME AND OVERTIME", 12f, muted, true), params(top = 8, bottom = 5))
         val extras = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        lateField = field("Late time", "0 hr 00 min")
-        overtimeField = field("Overtime time", "0 hr 00 min")
+        lateField = field("Late arrival time", morningStart)
+        overtimeField = field("Overtime finish time", afternoonEnd)
         lateField.isFocusable = false
         overtimeField.isFocusable = false
-        lateField.setOnClickListener { askHours("Enter late hours", lateField) }
-        overtimeField.setOnClickListener { askHours("Enter overtime hours", overtimeField) }
+        lateField.setOnClickListener { askClockTime("Select actual arrival time", lateField, morningStart) }
+        overtimeField.setOnClickListener { askClockTime("Select actual finish time", overtimeField, afternoonEnd) }
         extras.addView(lateField, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = 5 })
         extras.addView(overtimeField, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = 5 })
         form.addView(extras)
         val extraButtons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         extraButtons.addView(actionButton("＋ Add Late", 0xFFE5EDF8.toInt(), navy) {
-            askHours("Enter late hours", lateField)
+            askClockTime("Select actual arrival time", lateField, morningStart)
         }, LinearLayout.LayoutParams(0, dp(46), 1f).apply { rightMargin = dp(5) })
         extraButtons.addView(actionButton("＋ Add Overtime", 0xFFE5EDF8.toInt(), navy) {
-            askHours("Enter overtime hours", overtimeField)
+            askClockTime("Select actual finish time", overtimeField, afternoonEnd)
         }, LinearLayout.LayoutParams(0, dp(46), 1f).apply { leftMargin = dp(5) })
         form.addView(extraButtons, params(bottom = 4))
-        form.addView(text("Enter exact hours and minutes. Example: 1 hr 30 min.", 11f, muted))
+        form.addView(text("Choose the clock time. Example: arrival 08:05 = 5 minutes late; finish 17:30 = 30 minutes overtime.", 11f, muted))
         form.addView(actionButton("Save attendance", blue) { saveRecord() }, params(top = 12))
         form.addView(actionButton("Clear form", 0xFFE9EDF3.toInt(), navy) { clearForm() }, params(top = 6))
         root.addView(form, params(bottom = 12))
@@ -226,33 +226,28 @@ class MainActivity : Activity() {
             targetField.setText(String.format(Locale.US, "%02d:%02d", hour, minute))
         }, h, m, true).show()
     }
-    private fun askHours(title: String, destination: EditText) {
-        val current = durationMinutes(destination.text.toString())
-        val fields = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(16), dp(8), dp(16), dp(8))
-        }
-        val hours = EditText(this).apply {
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            hint = "Hours"
-            setText((current / 60).toString())
-        }
-        val minutes = EditText(this).apply {
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            hint = "Minutes"
-            setText((current % 60).toString().padStart(2, '0'))
-        }
-        fields.addView(hours, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = dp(8) })
-        fields.addView(minutes, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(8) })
-        AlertDialog.Builder(this).setTitle(title).setMessage("Enter exact hours and minutes.")
-            .setView(fields).setNegativeButton("Cancel", null)
-            .setPositiveButton("Save") { _, _ ->
-                val h = hours.text.toString().toIntOrNull()
-                val m = minutes.text.toString().toIntOrNull()
-                if (h == null || m == null || h < 0 || m !in 0..59) {
-                    toast("Enter hours and minutes. Minutes must be 00–59.")
-                } else destination.setText(formatDuration(h * 60 + m))
-            }.show()
+    private fun askClockTime(title: String, destination: EditText, defaultTime: String) {
+        val current = minutes(destination.text.toString()) ?: (minutes(defaultTime) ?: 0)
+        TimePickerDialog(this, { _, hour, minute ->
+            destination.setText(String.format(Locale.US, "%02d:%02d", hour, minute))
+        }, current / 60, current % 60, true).show()
+    }
+
+    private fun timeFromMinutes(total: Int): String {
+        val safe = total.coerceIn(0, 23 * 60 + 59)
+        return String.format(Locale.US, "%02d:%02d", safe / 60, safe % 60)
+    }
+
+    private fun lateMinutesFromTime(value: String): Int {
+        val entered = minutes(value) ?: return 0
+        val scheduled = minutes(morningStart) ?: return 0
+        return (entered - scheduled).coerceAtLeast(0)
+    }
+
+    private fun overtimeMinutesFromTime(value: String): Int {
+        val entered = minutes(value) ?: return 0
+        val scheduled = minutes(afternoonEnd) ?: return 0
+        return (entered - scheduled).coerceAtLeast(0)
     }
 
     private fun durationMinutes(value: String): Int {
@@ -306,8 +301,8 @@ class MainActivity : Activity() {
 
     private fun saveRecord() {
         val date = dateField.text.toString().trim()
-        val late = durationHours(lateField.text.toString())
-        val overtime = durationHours(overtimeField.text.toString())
+        val late = lateMinutesFromTime(lateField.text.toString()) / 60.0
+        val overtime = overtimeMinutesFromTime(overtimeField.text.toString()) / 60.0
         val worked = if (status == "Present") workedHours(inField.text.toString(), outField.text.toString()) else 0.0
         if (!date.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) || late < 0 || overtime < 0 || (status == "Present" && worked <= 0)) {
             toast("Check the date, time in/out, late and overtime values.")
@@ -318,7 +313,7 @@ class MainActivity : Activity() {
             .put("id", id).put("date", date).put("timeIn", inField.text.toString())
             .put("timeOut", outField.text.toString()).put("status", status)
             .put("hours", worked + if (status == "Present") overtime else 0.0)
-            .put("late", late).put("overtime", overtime)
+            .put("late", late).put("overtime", overtime).put("timeBased", true)
         val old = records.indexOfFirst { it.optString("id") == id || it.optString("date") == date }
         if (old >= 0) records[old] = item else records.add(item)
         records.sortBy { it.optString("date") }
@@ -332,14 +327,25 @@ class MainActivity : Activity() {
         dateField.setText(today())
         inField.setText(morningStart)
         outField.setText(afternoonEnd)
-        lateField.setText("0 hr 00 min")
-        overtimeField.setText("0 hr 00 min")
+        lateField.setText(morningStart)
+        overtimeField.setText(afternoonEnd)
         setStatus("Present")
     }
     private fun loadRecords() {
         records.clear()
         val array = JSONArray(prefs.getString("records", "[]"))
-        for (i in 0 until array.length()) records.add(array.getJSONObject(i))
+        for (i in 0 until array.length()) {
+            val item = array.getJSONObject(i)
+            if (!item.optBoolean("timeBased", false)) {
+                val oldLateClock = (item.optDouble("late", 0.0) * 60).toInt()
+                val oldOvertimeClock = (item.optDouble("overtime", 0.0) * 60).toInt()
+                item.put("late", (oldLateClock - (minutes(morningStart) ?: 0)).coerceAtLeast(0) / 60.0)
+                item.put("overtime", (oldOvertimeClock - (minutes(afternoonEnd) ?: 0)).coerceAtLeast(0) / 60.0)
+                item.put("timeBased", true)
+            }
+            records.add(item)
+        }
+        persist()
     }
     private fun persist() {
         val array = JSONArray()
@@ -394,8 +400,8 @@ class MainActivity : Activity() {
         dateField.setText(item.optString("date"))
         inField.setText(item.optString("timeIn"))
         outField.setText(item.optString("timeOut"))
-        lateField.setText(formatDuration((item.optDouble("late", 0.0) * 60).toInt()))
-        overtimeField.setText(formatDuration((item.optDouble("overtime", 0.0) * 60).toInt()))
+        lateField.setText(timeFromMinutes((minutes(morningStart) ?: 0) + (item.optDouble("late", 0.0) * 60).toInt()))
+        overtimeField.setText(timeFromMinutes((minutes(afternoonEnd) ?: 0) + (item.optDouble("overtime", 0.0) * 60).toInt()))
         setStatus(item.optString("status", "Present"))
         Toast.makeText(this, "Update the fields and tap Save attendance.", Toast.LENGTH_SHORT).show()
     }
