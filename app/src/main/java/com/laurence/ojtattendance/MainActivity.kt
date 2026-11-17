@@ -115,7 +115,8 @@ class MainActivity : Activity() {
         val quick = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         quick.addView(actionButton("Calendar", navy) { showCalendar() }, LinearLayout.LayoutParams(0, 48, 1f).apply { rightMargin = 6 })
         quick.addView(actionButton("Settings", 0xFFE5EDF8.toInt(), navy) { showSettings() }, LinearLayout.LayoutParams(0, 48, 1f).apply { leftMargin = 6 })
-        root.addView(quick, params(bottom = 12))
+        root.addView(quick, params(bottom = 6))
+        root.addView(actionButton("＋ Add Previous OJT Hours", 0xFFE5EDF8.toInt(), navy) { showPreviousHoursDialog() }, params(bottom = 12))
 
         val form = card()
         form.addView(text("DAILY ATTENDANCE", 12f, blue, true))
@@ -359,14 +360,16 @@ class MainActivity : Activity() {
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
 
     private fun refresh() {
-        val done = records.sumOf { it.optDouble("hours", 0.0) }
+        val pastHours = prefs.getInt("past_hours_minutes", 0) / 60.0
+        val done = pastHours + records.sumOf { it.optDouble("hours", 0.0) }
         val safeTarget = target.coerceAtLeast(1.0)
         val percent = (done / safeTarget * 100).coerceIn(0.0, 100.0)
         completedText.text = String.format(Locale.US, "%.1f", done)
         percentText.text = String.format(Locale.US, "%.0f%%", percent)
         progressBar.progress = (percent * 10).toInt()
         remainingText.text = String.format(Locale.US, "%.1f hours remaining of %.1f", (safeTarget - done).coerceAtLeast(0.0), safeTarget)
-        scheduleText.text = "Work schedule: " + morningStart + "–" + morningEnd + " and " + afternoonStart + "–" + afternoonEnd
+        scheduleText.text = "Previous OJT: " + formatDuration(prefs.getInt("past_hours_minutes", 0)) +
+            "  •  Work schedule: " + morningStart + "–" + morningEnd + " and " + afternoonStart + "–" + afternoonEnd
         updateEstimate(done)
         recordsBox.removeAllViews()
         if (records.isEmpty()) {
@@ -430,6 +433,36 @@ class MainActivity : Activity() {
         }
         estimateText.text = "Estimated finish: " + SimpleDateFormat("MMM d, yyyy", Locale.US).format(date.time) +
             "  •  assumes 6 workdays/week, no holidays"
+    }
+
+    private fun showPreviousHoursDialog() {
+        val currentMinutes = prefs.getInt("past_hours_minutes", 0)
+        val input = field("Total previous hours (HH:MM)", durationClock(currentMinutes)).apply {
+            inputType = InputType.TYPE_CLASS_TEXT
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), 0)
+            addView(text("Enter the total OJT time you completed before using this app.", 13f, muted))
+            addView(input, params(top = 8))
+            addView(text("Example: 120:30 means 120 hours and 30 minutes. This is added once to your progress.", 11f, muted))
+        }
+        AlertDialog.Builder(this).setTitle("Add previous OJT hours")
+            .setView(panel)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save") { _, _ ->
+                val value = input.text.toString().trim()
+                val match = Regex("^(\\d{1,5}):(\\d{2})$").matchEntire(value)
+                val hours = match?.groupValues?.get(1)?.toIntOrNull()
+                val mins = match?.groupValues?.get(2)?.toIntOrNull()
+                if (hours == null || mins == null || mins !in 0..59) {
+                    toast("Use HH:MM format, for example 120:30.")
+                } else {
+                    prefs.edit().putInt("past_hours_minutes", hours * 60 + mins).apply()
+                    refresh()
+                    toast("Previous OJT hours saved.")
+                }
+            }.show()
     }
 
     private fun showSettings() {
