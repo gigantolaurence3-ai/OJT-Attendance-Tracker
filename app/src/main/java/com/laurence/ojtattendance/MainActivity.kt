@@ -124,17 +124,12 @@ class MainActivity : Activity() {
         dateField = field("Attendance date", today()).apply { setOnClickListener { chooseDate() } }
         form.addView(dateField)
         val times = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        inField = field("Arrived time (late after 8:00 AM)", "08:00").apply { setOnClickListener { chooseTime(this) } }
+        inField = field("Arrived time (automatic on Save)", "Auto on Save").apply { isFocusable = false; isClickable = false }
         outField = field("Time out", afternoonEnd).apply { setOnClickListener { chooseTime(this) } }
         times.addView(inField, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = 5 })
         times.addView(outField, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = 5 })
         form.addView(times)
-        form.addView(actionButton("⏱ Clock in now (use current time)", 0xFFE5EDF8.toInt(), navy) {
-            val currentTime = SimpleDateFormat("HH:mm", Locale.US).format(Date())
-            inField.setText(currentTime)
-            toast("Arrived at " + currentTime)
-        }, params(bottom = 6))
-        form.addView(text("Clock in now shows your arrival time using your phone's current time. Arrival before 8:00 AM is recorded but does not add extra credit; lateness is counted only after 8:00 AM.", 11f, muted), params(bottom = 4))
+        form.addView(text("Press Save attendance to capture your phone's current time automatically as your arrival time. Arrivals before 8:00 AM do not add extra credit; lateness is counted only after 8:00 AM.", 11f, muted), params(bottom = 4))
         form.addView(text("Attendance status", 12f, muted, true), params(top = 5, bottom = 4))
         val statusRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         presentButton = actionButton("Present", green) { setStatus("Present") }
@@ -219,19 +214,12 @@ class MainActivity : Activity() {
             targetField.setText(String.format(Locale.US, "%02d:%02d", hour, minute))
         }, h, m, true).show()
     }
-    private fun askClockTime(title: String, destination: EditText, defaultTime: String) {
-        val current = minutes(destination.text.toString()) ?: (minutes(defaultTime) ?: 0)
-        TimePickerDialog(this, { _, hour, minute ->
-            destination.setText(String.format(Locale.US, "%02d:%02d", hour, minute))
-        }, current / 60, current % 60, true).show()
-    }
 
     private fun timeFromMinutes(total: Int): String {
         val safe = total.coerceIn(0, 23 * 60 + 59)
         return String.format(Locale.US, "%02d:%02d", safe / 60, safe % 60)
     }
 
-    private fun lateMinutesFromTime(value: String): Int = durationMinutes(value)
     private fun overtimeMinutesFromTime(value: String): Int = durationMinutes(value)
 
     private fun durationMinutes(value: String): Int {
@@ -248,7 +236,6 @@ class MainActivity : Activity() {
             val m = clock.groupValues[2].toIntOrNull() ?: 0
             return if (m in 0..59) h * 60 + m else 0
         }
-        // Read older saved decimal-hour values for compatibility with existing records.
         val number = text.toDoubleOrNull() ?: 0.0
         return if (number >= 0) (number * 60).toInt() else 0
     }
@@ -258,18 +245,12 @@ class MainActivity : Activity() {
     private fun durationClock(totalMinutes: Int): String =
         String.format(Locale.US, "%02d:%02d", totalMinutes / 60, totalMinutes % 60)
 
-    private fun durationHours(value: String): Double = durationMinutes(value) / 60.0
     private fun minutes(s: String): Int? {
         val p = s.split(":")
         if (p.size != 2) return null
         val h = p[0].toIntOrNull() ?: return null
         val m = p[1].toIntOrNull() ?: return null
         return if (h in 0..23 && m in 0..59) h * 60 + m else null
-    }
-    private fun dailyMinutes(start: String, end: String): Int {
-        val a = minutes(start) ?: return 0
-        val b = minutes(end) ?: return 0
-        return (b - a).coerceAtLeast(0)
     }
     private fun workedHours(start: String, end: String): Double {
         val a = minutes(start) ?: return -1.0
@@ -287,28 +268,29 @@ class MainActivity : Activity() {
 
     private fun saveRecord() {
         val date = dateField.text.toString().trim()
-        val arrivedAt = minutes(inField.text.toString())
+        // Capture the phone's current local time at the moment Save is pressed.
+        val arrivedTime = SimpleDateFormat("HH:mm", Locale.US).format(Date())
+        inField.setText(arrivedTime)
+        val arrivedAt = minutes(arrivedTime)
         val overtimeText = overtimeField.text.toString().trim()
         val durationPattern = Regex("^\\d{1,3}:\\d{2}$")
         if (arrivedAt == null || !durationPattern.matches(overtimeText) ||
             (overtimeText.substringAfter(":").toIntOrNull() ?: 99) !in 0..59) {
-            toast("Choose a valid arrival time and enter overtime as HH:MM.")
+            toast("Enter overtime as HH:MM.")
             return
         }
-        // Only time after 8:00 AM is counted as late.
         val lateMinutes = (arrivedAt - (8 * 60)).coerceAtLeast(0)
         val late = lateMinutes / 60.0
         val overtime = overtimeMinutesFromTime(overtimeText) / 60.0
-        val worked = if (status == "Present") workedHours(inField.text.toString(), outField.text.toString()) else 0.0
+        val worked = if (status == "Present") workedHours(arrivedTime, outField.text.toString()) else 0.0
         if (!date.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) || overtime < 0 || (status == "Present" && worked < 0)) {
-            toast("Check the date and time values.")
+            toast("Check the date and time values. Make sure Time out is later than your arrival time.")
             return
         }
-        // Daily credit is 8 hours minus lateness after 8:00 AM, plus overtime.
         val credited = if (status == "Present") ((8 * 60 - lateMinutes).coerceAtLeast(0) + (overtime * 60).toInt()) / 60.0 else 0.0
         val id = editingId ?: System.currentTimeMillis().toString()
         val item = JSONObject()
-            .put("id", id).put("date", date).put("timeIn", inField.text.toString())
+            .put("id", id).put("date", date).put("timeIn", arrivedTime)
             .put("timeOut", outField.text.toString()).put("status", status)
             .put("hours", credited)
             .put("late", late).put("overtime", overtime).put("timeBased", true)
@@ -318,14 +300,13 @@ class MainActivity : Activity() {
         persist()
         clearForm()
         refresh()
-        toast("Attendance saved.")
+        toast("Arrived at " + arrivedTime + ". Attendance saved.")
     }
     private fun clearForm() {
         editingId = null
         dateField.setText(today())
-        inField.setText(morningStart)
+        inField.setText("Auto on Save")
         outField.setText(afternoonEnd)
-        inField.setText("08:00")
         overtimeField.setText("00:00")
         setStatus("Present")
     }
@@ -341,7 +322,6 @@ class MainActivity : Activity() {
                 item.put("overtime", (oldOvertimeClock - (minutes(afternoonEnd) ?: 0)).coerceAtLeast(0) / 60.0)
                 item.put("timeBased", true)
             }
-            // Recalculate lateness from arrival time, using 8:00 AM as the only cutoff.
             val arrivedAt = minutes(item.optString("timeIn")) ?: (8 * 60)
             val lateMinutes = (arrivedAt - 8 * 60).coerceAtLeast(0)
             item.put("late", lateMinutes / 60.0)
@@ -407,11 +387,10 @@ class MainActivity : Activity() {
     private fun edit(item: JSONObject) {
         editingId = item.optString("id")
         dateField.setText(item.optString("date"))
-        inField.setText(item.optString("timeIn"))
+        inField.setText("Auto on Save")
         outField.setText(item.optString("timeOut"))
         overtimeField.setText(durationClock((item.optDouble("overtime", 0.0) * 60).toInt()))
         setStatus(item.optString("status", "Present"))
-        Toast.makeText(this, "Update the fields and tap Save attendance.", Toast.LENGTH_SHORT).show()
     }
 
     private fun updateEstimate(done: Double) {
@@ -490,7 +469,7 @@ class MainActivity : Activity() {
                         .putString("morning_end", me.text.toString())
                         .putString("afternoon_start", asf.text.toString())
                         .putString("afternoon_end", ae.text.toString()).apply()
-                    inField.setText("08:00"); outField.setText(afternoonEnd)
+                    inField.setText("Auto on Save"); outField.setText(afternoonEnd)
                     refresh(); toast("Settings saved.")
                 }
             }.show()
