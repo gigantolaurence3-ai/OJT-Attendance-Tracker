@@ -129,6 +129,12 @@ class MainActivity : Activity() {
         times.addView(inField, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = 5 })
         times.addView(outField, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = 5 })
         form.addView(times)
+        form.addView(actionButton("⏱ Clock in now (use current time)", 0xFFE5EDF8.toInt(), navy) {
+            val currentTime = SimpleDateFormat("HH:mm", Locale.US).format(Date())
+            inField.setText(currentTime)
+            toast("Arrival time recorded: " + currentTime)
+        }, params(bottom = 6))
+        form.addView(text("Clock in now records your phone's current time. Arrival before 8:00 AM is recorded but does not add extra credit; lateness is counted only after 8:00 AM.", 11f, muted), params(bottom = 4))
         form.addView(text("Attendance status", 12f, muted, true), params(top = 5, bottom = 4))
         val statusRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         presentButton = actionButton("Present", green) { setStatus("Present") }
